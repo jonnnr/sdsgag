@@ -2,10 +2,11 @@
 #################################################
 # Generated Digest of Verse API
 # DO NOT modify this manually!
-# Generated from build: ++Fortnite+Release-39.00-CL-48801071
+# Generated from build: ++Fortnite+Release-40.40-CL-53683214
 #################################################
 
 SceneGraph<public> := module:
+    using {/Verse.org/Native}
     using {/Verse.org/Simulation}
     # An interactable component with a composable feature set.
     basic_interactable_component<native><public> := class(interactable_component):
@@ -20,6 +21,19 @@ SceneGraph<public> := module:
 
         # The agents which are currently interacting with this interactable.
         var<private> InteractingAgents<native><public>:[]agent = external {}
+
+        @available {MinUploadedAtFNVersion := 4020}
+        InteractMessage<override>(Agent:agent)<reads><decides>:message = external {}
+
+        @available {MinUploadedAtFNVersion := 4020}
+        @editable
+        # Message shown if CanInteract succeeds.
+        var CanInteractMessage<public>:message = external {}
+
+        @available {MinUploadedAtFNVersion := 4020}
+        @editable
+        # Message shown if CanInteract fails.
+        var CannotInteractMessage<public>:message = external {}
 
         @editable
         # Cooldowns begin elapsing on successful interactions. A cooldown which applies for all attempts to interact on this component.
@@ -138,7 +152,6 @@ SceneGraph<public> := module:
         # Resets the counter for the times this component has had a successful interaction.
         ClearSuccessfulInteractionCount<native><public>()<transacts>:void
 
-    using {/Verse.org/Native}
     @available {MinUploadedAtFNVersion := 3200}
     # Finds all descendant entities including `InEntity` of type `entity_type`.
     # The order of the returned entities is unspecified and subject to change.
@@ -168,7 +181,22 @@ SceneGraph<public> := module:
     # Finds all components attached to ancestor entities to `InEntity` of type `component_type`.
     # The order of the returned components is unspecified and subject to change.
     (InEntity:entity).FindAncestorComponents<native><public>(component_type:castable_subtype(component))<transacts>:generator(component_type)
-    using {/Verse.org/Simulation/Tags}
+    # Entity client streaming modes
+    entity_streaming_policy<native><public> := enum:
+        # Entity will be spatially loaded.
+        Spatial
+        # Entity will be non-spatially loaded.
+        NonSpatial
+        # Entity will be always loaded.
+        Persistent
+
+    # Child entities client streaming modes
+    children_streaming_policy<native><public> := enum:
+        # Child entities are loaded atomically with their parent.
+        Atomic
+        # Child entities are loaded independently from their parent.
+        Discrete
+
     using {/Verse.org/SpatialMath}
     using {/Verse.org/Colors}
     # A `capsule_light_component` emits light in all directions into the scene from a capsule shaped source with a specified radius and length. A radius and length of 0 makes it a point light. You can use these
@@ -547,38 +575,6 @@ SceneGraph<public> := module:
         var OuterConeAngleDegrees<public>:float = external {}
 
     @experimental
-    # Used to add tags to an entity. Tagged entities can then be queried using `entity.FindDescendantEntitiesWithTag` and `entity.FindAncestorEntitiesWithTag`.
-    #   * Finding entities from the simulation entity for tagged entities only considers any `tag_component` that has run `OnAddedToScene`.
-    tag_component<native><public> := class<final><final_super>(component, tag_view):
-        # Determine if TagToCheck is present in this container, also checking against parent tags {"A.1"}.Has("A") will return True, {"A"}.Has("A.1") will return False If TagToCheck is not Valid it will always return False.
-        Has<native><override>(TagToCheck:tag)<reads><decides>:void
-
-        # Checks if this container contains ANY of the tags in the specified container, also checks against parent tags {"A.1"}.HasAny({"A","B"}) will return True, {"A"}.HasAny({"A.1","B"}) will return False If InTags is empty/invalid it will always return False.
-        HasAny<native><override>(InTags:[]tag)<reads><decides>:void
-
-        # Checks if this container contains ALL of the tags in the specified container, also checks against parent tags {"A.1","B.1"}.HasAll({"A","B"}) will return True, {"A","B"}.HasAll({"A.1","B.1"}) will return False If InTags is empty/invalid it will always return True, because there were no failed checks.
-        HasAll<native><override>(InTags:[]tag)<reads><decides>:void
-
-        # Adds a tag to this component. Returns `true` if the tag was not present before being added.
-        AddTag<native><public>(TagToAdd:tag)<transacts>:logic
-
-        # Removes a tag from this component. Returns `true` if the tag was present before being removed.
-        RemoveTag<native><public>(TagToRemove:tag)<transacts>:logic
-
-    @available {MinUploadedAtFNVersion := 2930}
-    @experimental
-    # Finds all descendant entities including `InEntity` with `Tag` present in their `tag_component`.
-    # When querying from the simulation entity, the simulation entity itself is not included in the results.
-    # The order of the returned entities is unspecified and subject to change.
-    (InEntity:entity).FindDescendantEntitiesWithTag<native><public>(Tag:tag)<transacts>:generator(entity)
-
-    @available {MinUploadedAtFNVersion := 2930}
-    @experimental
-    # Finds all ancestor entities to `InEntity` with `Tag` present in their `tag_component`.
-    # The order of the returned entities is unspecified and subject to change.
-    (InEntity:entity).FindAncestorEntitiesWithTag<native><public>(Tag:tag)<transacts>:generator(entity)
-
-    @experimental
     # A range with a minimum and maximum value. For a value to fall inside of this range, the min value must be less than or equal to the max value.
     float_range<native><public> := struct<concrete>:
         Minimum<native><public>:float = external {}
@@ -749,6 +745,8 @@ SceneGraph<public> := module:
         var Extents<public>:(/Verse.org/SpatialMath:)vector3
 
 
+    using {/Verse.org/Assets}
+    using {/Verse.org/Simulation/Tags}
     # Base class for authoring logic and data in the SceneGraph. Using components you
     # can author re-usable building blocks of logic and data which can then be added to
     # entities in the scene.
@@ -847,6 +845,16 @@ SceneGraph<public> := module:
         # Set callbacks to `TickEvents.PrePhysics` and `TickEvents.PostPhysics` to receive per-frame updates before and after physics is updated on your object.
         var<private> TickEvents<protected>:tick_events = external {}
 
+        # Send a scene event to this component, invoking OnReceive.  Returns true if any participant consumed the event.
+        SendDown<native><native_callable><final><public>(SceneEvent:scene_event):logic
+
+        @available {MinUploadedAtFNVersion := 4000}
+        # Respond to a scene event. Return true to consume the event and halt propagation to the next entity.
+        OnReceive<native_callable><protected>(SceneEvent:scene_event):logic = external {}
+
+    # An event which can be sent through the scene graph.
+    scene_event<native><public> := interface:
+
     # Entities are the base object in the SceneGraph.
     #   * Objects in experiences are constructed of one or more entities.
     #   * Entities are hierarchical. You can query your parent using `GetParent` and add child entities using `AddEntities`.
@@ -865,7 +873,7 @@ SceneGraph<public> := module:
     #   that you do not add code directly to the entity class, and instead keep logic in components. Keeping logic and data in
     #   components allows you to restructure your prefabs throughout production of your experience, without needing to massively
     #   refactor your class structure.
-    entity<native><public> := class<concrete><unique><transacts><castable>:
+    entity<native><public> := class<concrete><unique><transacts><castable>(has_tags):
         # Returns the parent entity of this entity.
         #   * The parent entity controls the lifetime of its child entities and components. When an entity
         #     is removed from the scene, all its child entities and components will be removed as well.
@@ -905,8 +913,63 @@ SceneGraph<public> := module:
         #       3. All components have `OnBeginSimulation` called (if this entity is simulating).
         AddComponents<native><final><public>(Components:[]component):void
 
+        # Send a scene event to this entity and then up the hierarchy. First, SendDown/OnReceive will be invoked on each component on this entity. Next, SendUp will be invoked on this entity's parent. Consuming the event at any point will halt propagation. Returns true if any participant consumed the event.
+        SendUp<native><native_callable><final><public>(SceneEvent:scene_event):logic
+
+        # Send a scene event to this entity and then down the hierarchy. First, SendDown/OnReceive will be invoked on each component on this entity. Next, SendDown will be invoked on each child entity.  Consuming the event at any point will halt propagation. Returns true if any participant consumed the event.
+        SendDown<native><native_callable><final><public>(SceneEvent:scene_event):logic
+
+        # Adds a `tag` instance to this entity. Returns a `tag_key` that is uniquely associated with the added instance.
+        AddTag<override><native><final>(Tag:tag)<transacts>:tag_key
+
+        # Removes the tag instance associated with the `tag_key`, succeeds if an instance was removed, fails otherwise.
+        RemoveTag<override><native><final>(Key:tag_key)<transacts><decides>:void
+
+        @available {MinUploadedAtFNVersion := 3200}
+        # Removes all tag instances of type `tag_type`, succeeds if at least one instance was removed, fails otherwise.
+        RemoveAllTags<override><native><final>(tag_type:castable_subtype(tag))<transacts><decides>:void
+
+        @available {MinUploadedAtFNVersion := 3200}
+        # Removes all tag instances that are not of type `tag_type`, succeeds if at least one instance was removed, fails otherwise.
+        RemoveAllTagsExcept<override><native><final>(tag_type:castable_subtype(tag))<transacts><decides>:void
+
+        @available {MinUploadedAtFNVersion := 3200}
+        # Removes all tag instances that are not of any of the types in `tag_types`, succeeds if at least one instance was removed, fails otherwise.
+        RemoveAllTagsExcept<override><native><final>(tag_types:[]castable_subtype(tag))<transacts><decides>:void
+
+        @available {MinUploadedAtFNVersion := 3200}
+        # Succeeds if at least one tag of type `tag_type` is found in this container, fails otherwise.
+        ContainsTag<override><native><final>(tag_type:castable_subtype(tag))<reads><decides>:void
+
+        @available {MinUploadedAtFNVersion := 3200}
+        # Fails if at least one type in `tag_types` cannot be found in this container, succeeds otherwise. Note that this means that if `tag_types` is empty this call succeeds.
+        ContainsAllTags<override><native><final>(tag_types:[]castable_subtype(tag))<reads><decides>:void
+
+        @available {MinUploadedAtFNVersion := 3200}
+        # Succeeds if at least of the types in `tag_types` is found in this container, fails otherwise. Note that this means that if `tag_types` is empty this call fails.
+        ContainsAnyTag<override><native><final>(tag_types:[]castable_subtype(tag))<reads><decides>:void
+
     # Reference type to editor defined prefab. Only generated digest code should reference this type.
     entity_prefab<native><public> := class<computes><epic_internal>:
+
+    @available {MinUploadedAtFNVersion := 3200}
+    # Finds all descendant entities including `InEntity` that has any tags of type `tag_type`.
+    # When querying from the simulation entity, the simulation entity itself is not included in the results.
+    # The order of the returned entities is unspecified and subject to change.
+    (InEntity:entity).FindDescendantEntitiesWithTag<native><public>(tag_type:castable_subtype(tag))<transacts>:generator(entity)
+
+    @available {MinUploadedAtFNVersion := 3200}
+    # Finds all ancestor entities to `InEntity` that has any tags of type `tag_type`.
+    # The order of the returned entities is unspecified and subject to change.
+    (InEntity:entity).FindAncestorEntitiesWithTag<native><public>(tag_type:castable_subtype(tag))<transacts>:generator(entity)
+
+    # Component that holds an icon for an entity.
+    icon_component<native><public> := class<final_super>(component, has_icon):
+        var Icon<override>:texture = external {}
+
+        OnBeginSimulation<override>():void = external {}
+
+        OnEndSimulation<override>():void = external {}
 
     # Interface to provide alternative origin to an entity which is defaulted to its parent. See `transform_component`
     origin<native><public> := interface<epic_internal>:
@@ -920,10 +983,113 @@ SceneGraph<public> := module:
 
         GetTransform<override>()<transacts>:(/Verse.org/SpatialMath:)transform = external {}
 
+    @available {MinUploadedAtFNVersion := 4000}
+    # Rarity may be used by gameplay and presentation systems to classify and rank things.
+    rarity<native><public> := class<castable><concrete><unique><allocates>:
+        @editable
+        Color<native><public>:color = external {}
+
+    @available {MinUploadedAtFNVersion := 4000}
+    common_rarity<public> := class<allocates>(rarity):
+
+    @available {MinUploadedAtFNVersion := 4000}
+    uncommon_rarity<public> := class<allocates>(common_rarity):
+        Color<override>:color = external {}
+
+    @available {MinUploadedAtFNVersion := 4000}
+    rare_rarity<public> := class<allocates>(uncommon_rarity):
+        Color<override>:color = external {}
+
+    @available {MinUploadedAtFNVersion := 4000}
+    epic_rarity<public> := class<allocates>(rare_rarity):
+        Color<override>:color = external {}
+
+    @available {MinUploadedAtFNVersion := 4000}
+    legendary_rarity<public> := class<allocates>(epic_rarity):
+        Color<override>:color = external {}
+
+    @available {MinUploadedAtFNVersion := 4000}
+    # Component that denotes the rarity of an entity.
+    rarity_component<native><public> := class<final_super>(component):
+        # The rarity of this entity. An entity can have only one rarity.
+        var Rarity<public>:rarity = external {}
+
+        OnBeginSimulation<override>():void = external {}
+
+        OnEndSimulation<override>():void = external {}
+
     # Returns the simulation entity parent for this entity.
     #   * The simulation entity is the rootmost entity in an experience.
     #   * Fails if this entity is not currently in the scene.
     (InEntity:entity).GetSimulationEntity<native><public>()<transacts><decides>:entity
+
+    @available {MinUploadedAtFNVersion := 4000}
+    # A component that when attached to an entity allows for it to merge or 'stack' with other entities with compatible components.
+    stackable_component<native><public> := class<abstract><final_super>(component):
+        @editable_number(int) {MinValue := option {1}}
+        # The current amount of this entity held in the stack.
+        var<private> StackSize<native><public>:int = external {}
+
+        @editable
+        # The maximum amount this component can hold. If unset, it holds an unlimited amount.
+        var<private> MaxStackSize<native><public>:?int = external {}
+
+        # Sets the stack size of this component. If the provided stack size is invalid, e.g. negative or exceeding MaxStackSize, stack size will not change.
+        SetStackSize<final><native><public>(NewStackSize:int)<transacts>:void
+
+        # Sets the maximum stack size for this component. If NewMaxStackSize is false, stack size is unlimited. If ClampStackSize is true, StackSize will be clamped to NewMaxStackSize.
+        SetMaxStackSize<final><native><public>(NewMaxStackSize:?int, ?ClampStackSize:logic = external {})<transacts>:void
+
+        Split<native_callable><public>(Amount:int)<transacts><decides>:entity
+
+        # Succeeds if this entity can be merged into the target entity. Merging an entity with itself will always fail. Note that merging should be checked in both directions!
+        CanMergeInto<native_callable><public>(TargetEntity:entity)<reads><decides>:void = external {}
+
+        # Attempts to merge this entity into the specified entity. Fails if entities cannot be merged.
+        #  If TargetAmount is specified, only that amount will try to be merged into this entity. By default, the entire stack will try to merge.
+        #  If the specified amount is invalid, the merge will fail.
+        MergeInto<native_callable><public>(TargetEntity:entity, ?TargetAmount:?int = external {})<transacts><decides>:void = external {}
+
+        ChangeStackSizeEvent<native><final><public>:listenable(change_stack_size_result) = external {}
+
+        ChangeMaxStackSizeEvent<native><final><public>:listenable(change_max_stack_size_result) = external {}
+
+        OnBeginSimulation<override>():void = external {}
+
+        OnEndSimulation<override>():void = external {}
+
+    @available {MinUploadedAtFNVersion := 4000}
+    change_stack_size_result<native><public> := class<epic_internal>:
+        StackableComponent<native><public>:stackable_component
+
+        PreviousStackSize<native><public>:int
+
+        CurrentStackSize<native><public>:int
+
+    @available {MinUploadedAtFNVersion := 4000}
+    change_max_stack_size_result<native><public> := class<epic_internal>:
+        StackableComponent<native><public>:stackable_component
+
+        PreviousMaxStackSize<native><public>:?int
+
+        CurrentMaxStackSize<native><public>:?int
+
+    # Merge Rules Interface. Implemented by components that want to participate in entity mergeability checks.
+    has_merge_rules<public> := interface<unique>:
+        AllowMergeInto<public>(TargetEntity:entity)<reads><decides>:void = external {}
+
+        OnMergeInto<public>(TargetEntity:entity, MergeAmount:int)<transacts>:void = external {}
+
+    @available {MinUploadedAtFNVersion := 4000}
+    basic_stackable_component<native><public> := class(stackable_component):
+        @editable
+        # The prefab used when this entity merges with another or when it is split into a new instance.
+        split_prefab_type<native><public>:castable_concrete_subtype(entity) = external {}
+
+        Split<override>(Amount:int)<transacts><decides>:entity = external {}
+
+        # Succeeds if this entity can be merged into the target entity. Merging an entity with itself will always fail.
+        CanMergeInto<override>(TargetEntity:entity)<reads><decides>:void = external {}
 
     # Describes discrete phases of a frame update. Subscribe to members of the tick_events object to run code before or after the physics system has updated your object, allowing you to affect or react to these updates.
     tick_events<native><public> := class<epic_internal>:
@@ -972,248 +1138,286 @@ SceneGraph<public> := module:
         # Subscribe a callback function to this TickEvent phase. The input parameter to your function (DeltaTime) is the time that has passed between the last update and the current update.
         Subscribe<native><override>(Callback:type {_(:float):void})<transacts>:cancelable
 
+Chat<public> := module:
+    using {/Verse.org/SceneGraph}
+    using {/Verse.org/Native}
+    using {/Verse.org/AgentGroup}
+    @available {MinUploadedAtFNVersion := 4000}
+    @experimental
+    chat_channel<native><public>(member_info:subtype(member_info_interface)) := class<unique><abstract><internal>:
+        (/Verse.org/Chat/chat_channel:)Chat_chat_channel_Variance<private>():tuple(member_info) = external {}
+
+        Name<public>:message
+
+        @available {MinUploadedAtFNVersion := 4000}
+        Group<public>:agent_group_interface(member_info)
+
+    @available {MinUploadedAtFNVersion := 4000}
+    @experimental
+    # Used to specify permissions and other settings for a voice_channel.
+    has_voice_member_info<native><public> := interface(member_info_interface):
+        # Determines if the participant can send voice messages to the channel.
+        # If true, the participant can still hear those who are broadcasting and see users in the social overlay panel.
+        var CanBroadcast<public>:logic = external {}
+
+    @available {MinUploadedAtFNVersion := 4000}
+    @experimental
+    # A `voice_channel` defines a group of agents who can communicate via voice chat.
+    # An agent can be a member of more than one `voice_channel`.Voice channels can accommodate 80 members of the channel's `Group`. Agents beyond this limit are not included in the chat.A chat participant in a `voice_channel` may be restricted from voice chat based on parental controls and/or user settings.
+    voice_channel<native><public>(member_info:subtype(has_voice_member_info)) := class<final>(chat_channel(member_info)):
+
+    @available {MinUploadedAtFNVersion := 4000}
+    @experimental
+    (Entity:entity).GetVoiceChannels<native><public>()<reads>:[]voice_channel(has_voice_member_info)
+
+    @experimental
+    # Error returned when a channel cannot be added via the `AddChatChannel` function.
+    add_channel_error<public> := class<computes>:
+
 Presentation<public> := module:
     using {/Verse.org/Simulation}
-    # Interface that provides descriptive names or text.
-    has_description<public> := interface:
-        @editable
-        # Name.
-        var<protected> Name<public>:message
-
-        @editable
-        # Full description.
-        var<protected> Description<public>:message
-
-        @editable
-        # Short description with only the essential information.
-        var<protected> ShortDescription<public>:message
-
-Simulation<public> := module:
-    # Module import path: /Verse.org/Simulation/Tags
-    Tags<public> := module:
-        # A single gameplay tag, which represents a hierarchical name of the form x.y that is registered in the GameplayTagsManager You can filter the gameplay tags displayed in the editor.
-        tag<native><public> := class<abstract><castable>:
-
-        # A queryable collection of gameplay tags.
-        tag_view<native><public> := interface<epic_internal>:
-            # Determine if TagToCheck is present in this container, also checking against parent tags {"A.1"}.Has("A") will return True, {"A"}.Has("A.1") will return False If TagToCheck is not Valid it will always return False.
-            Has<public>(TagToCheck:tag)<reads><decides>:void
-
-            # Checks if this container contains ANY of the tags in the specified container, also checks against parent tags {"A.1"}.HasAny({"A","B"}) will return True, {"A"}.HasAny({"A.1","B"}) will return False If InTags is empty/invalid it will always return False.
-            HasAny<public>(InTags:[]tag)<reads><decides>:void
-
-            # Checks if this container contains ALL of the tags in the specified container, also checks against parent tags {"A.1","B.1"}.HasAll({"A","B"}) will return True, {"A","B"}.HasAll({"A.1","B.1"}) will return False If InTags is empty/invalid it will always return True, because there were no failed checks.
-            HasAll<public>(InTags:[]tag)<reads><decides>:void
-
-        tag_search_sort_type<native><public> := enum:
-            Unsorted
-            Sorted
-
-        # Advanced tag search criteria
-        tag_search_criteria<native><public> := class:
-            # Tags required to be on the object.
-            RequiredTags<native><public>:[]tag = external {}
-
-            # Tags that are used if no required tags are specified. These are treated as if any of them will do.
-            PreferredTags<native><public>:[]tag = external {}
-
-            # Tags that may NOT be on the object. All items with these tags are excluded from the search.
-            ExclusionTags<native><public>:[]tag = external {}
-
-            # Flag to request sorting the results by tag.
-            SortType<native><public>:tag_search_sort_type = external {}
-
-    @attribscope_class
-    @attribscope_struct
-    @attribscope_data
-    @customattribhandler
-    editable<public> := class<computes>(attribute):
-        # The tooltip displayed in the editor.
-        ToolTip<public>:message = external {}
-
-        # The categories displayed in the editor.
-        Categories<public>:[]message = external {}
-
-    @attribscope_class
-    @attribscope_struct
-    @attribscope_data
-    @customattribhandler
-    editable_text_box<public> := class<final><computes>(editable):
-        # True if the editor text box should support multiple lines.
-        MultiLine<public>:logic = external {}
-
-        # The maximum length of the text.
-        MaxLength<public>:int = external {}
-
-    @attribscope_class
-    @attribscope_struct
-    @attribscope_data
-    @customattribhandler
-    editable_slider<public>(t:type) := class<final><computes>(editable):
-        (/Verse.org/Simulation/editable_slider:)Simulation_editable_slider_Variance<private>:?type {_():tuple(t)} = external {}
-
-        # The minimum value of the editor slider.
-        MinValue<public>:?t = external {}
-
-        # The maximum value of the editor slider.
-        MaxValue<public>:?t = external {}
-
-        # The amount the slider moves for each step.
-        SliderDelta<public>:?t = external {}
-
-        # Used to scale a slider exponentially. Common values are found within the range of 1-20.
-        SliderExponent<public>:?t = external {}
-
-        # Used to change how sensitive the field value is when moving the slider via mouse cursor.
-        MouseLinearDeltaSensitivity<public>:float = external {}
-
-        MouseShiftMovePixelPerDelta<public>:float = external {}
-
-    @attribscope_class
-    @attribscope_struct
-    @attribscope_data
-    @customattribhandler
-    editable_number<public>(t:type) := class<final><computes>(editable):
-        (/Verse.org/Simulation/editable_number:)Simulation_editable_number_Variance<private>:?type {_():tuple(t)} = external {}
-
-        # The minimum value the editor allows.
-        MinValue<public>:?t = external {}
-
-        # The maximum value the editor allows.
-        MaxValue<public>:?t = external {}
-
-        # Snap the spinbox to the nearest delta.
-        SpinBoxDelta<public>:?t = external {}
-
-    @attribscope_class
-    @attribscope_struct
-    @attribscope_data
-    @customattribhandler
-    editable_vector_slider<public>(t:type) := class<final><computes>(editable):
-        (/Verse.org/Simulation/editable_vector_slider:)Simulation_editable_vector_slider_Variance<private>:?type {_():tuple(t)} = external {}
-
-        # Show the button that allows locking the vector aspect ratio.
-        ShowPreserveRatio<public>:logic = external {}
-
-        # Show the button that allows normalizing the vector.
-        ShowNormalize<public>:logic = external {}
-
-        # The minimum value allowed for each vector element.
-        MinComponentValue<public>:?t = external {}
-
-        # The maximum value allowed for each vector element.
-        MaxComponentValue<public>:?t = external {}
-
-        # The amount the slider moves for each step.
-        SliderDelta<public>:?t = external {}
-
-        # Used to scale a slider exponentially. Common values are found within the range of 1-20.
-        SliderExponent<public>:?t = external {}
-
-        # Used to change how sensitive the field value is when moving the slider via mouse cursor.
-        MouseLinearDeltaSensitivity<public>:float = external {}
-
-        MouseShiftMovePixelPerDelta<public>:float = external {}
-
-    @attribscope_class
-    @attribscope_struct
-    @attribscope_data
-    @customattribhandler
-    editable_vector_number<public>(t:type) := class<final><computes>(editable):
-        (/Verse.org/Simulation/editable_vector_number:)Simulation_editable_vector_number_Variance<private>:?type {_():tuple(t)} = external {}
-
-        # Show the button that allows locking the vector aspect ratio.
-        ShowPreserveRatio<public>:logic = external {}
-
-        # Show the button that allows normalizing the vector.
-        ShowNormalize<public>:logic = external {}
-
-        # The minimum value allowed for each vector element.
-        MinComponentValue<public>:?t = external {}
-
-        # The maximum value allowed for each vector element.
-        MaxComponentValue<public>:?t = external {}
-
-        # Snap the spinbox to the nearest delta.
-        SpinBoxDelta<public>:?t = external {}
-
-    @attribscope_class
-    @attribscope_struct
-    @attribscope_data
-    @customattribhandler
-    editable_container<public> := class<final><computes>(editable):
-        # If true, allows reordering of the container elements in the editor.
-        AllowReordering<public>:logic = external {}
-
-
-    using {/Verse.org/Native}
-    # Type for which there is a single instance per round.  Use `GetSession` to get the current round's `session` instance. May be used with `weak_map` to implement global variables.
-    # Note: may be changed in a future release to a single instance per game. Round-local behavior should not be relied upon.
-    session<native><public> := class<unique><module_scoped_var_weak_map_key><epic_internal>:
-
-    # Returns the `session` corresponding to the current round.  The result can be used with `weak_map` to implement global variables.
-    # Note: may be changed in a future release to return a single instance per game. Round-local behavior should not be relied upon.
-    GetSession<native><public>()<reads>:session
-
-    # Specifies what type of environment the current session is in.
-    session_environment<native><public> := enum:
-        # The current session is in an Edit environment for an experience, such as a session started within UEFN.
-        Edit
-        # The current session is in a Private environment for an experience, such as a playtest.
-        Private
-        # The current session is in a Live environment for an experience.
-        Live
-
-    @available {MinUploadedAtFNVersion := 3800}
-    (Session:session).Environment<native><public>()<transacts>:session_environment
-
-    # Waits specified number of seconds and then resumes. If `Seconds` = 0.0 then it waits until next tick/frame/update. If `Seconds` = Inf then it waits forever and only calls back if canceled - such as via `race`. If `Seconds` < 0.0 then it completes immediately and does not yield to other aysnc expressions.
-    # Waiting until the next update (0.0) is especially useful in a loop of a coroutine that needs to do some work every update and this yields to other coroutines so that it doesn't hog a processor's resources.
-    # Waiting forever (Inf) will have any expression that follows never be evaluated. Occasionally it is desireable to have a task never complete such as the last expression in a `race` subtask where the task must never win the race though it still may be canceled earlier.
-    # Immediately completing (less than 0) is useful when you want programmatic control over whether an expression yields or not.
-    Sleep<native><public>(Seconds:float)<suspends>:void
-
-    # Get the seconds that have elapsed since the world began simulating
-    GetSimulationElapsedTime<native><public>()<transacts>:float
-
-    team<native><public> := class<unique><epic_internal>:
-
     using {/Verse.org/SceneGraph}
-    agent<native><public> := class<unique><epic_internal>(entity):
+    # Component that holds the details for an entity, such as name and description.
+    description_component<native><public> := class<final_super>(component, has_description):
+        var Name<override>:message = external {}
 
-    localizable_agent<native><epic_internal> := class(localizable_value):
+        var Description<override>:message = external {}
 
-    (/Verse.org/Simulation:)MakeLocalizableValue<epic_internal>(Agent:agent):localizable_agent = external {}
+        var ShortDescription<override>:message = external {}
 
-    player<native><public> := class<unique><persistent><module_scoped_var_weak_map_key><epic_internal>(agent):
-        # Succeeds when this `player` may be used as a module-scoped `var` `weak_map` key. This coincides with the corresponding player having joined the game and not yet left. Using a `player` as a module-scope `var` `weak_map` key when this method fails results in a runtime error.
-        IsActive<native><public>()<reads><decides>:void
+        OnBeginSimulation<override>():void = external {}
 
+        OnEndSimulation<override>():void = external {}
 
-# Module import path: /Verse.org/Assets
-Assets<public> := module:
-    using {/Verse.org/Simulation}
-    animation_sequence<native><public> := class<computes><final><epic_internal>:
-
-    material<native><public> := class<epic_internal>:
-
-    particle_system<native><public> := class<computes><final><epic_internal>:
-
-    mesh<native><public> := class<computes><epic_internal>:
-
-    sound_wave<native><public> := class<computes><final><epic_internal>:
-
-    texture<native><public> := class<computes><final><epic_internal>:
-
-    input_action<native><public>(t:type) := class<computes><epic_internal>:
-        (/Verse.org/Assets/input_action:)Assets_input_action_Variance<private>:?type {_():tuple(t)} = external {}
-
-    input_mapping<native><public> := class<computes><epic_internal>:
-
-    # Interface that provides an icon.
-    has_icon<public> := interface:
+    # Interface that provides descriptive names or text.
+    has_description<native><public> := interface:
         @editable
-        var<protected> Icon<public>:texture
+        # The display name of this entity.
+        var Name<public>:message
+
+        @editable
+        # The full description of this entity.
+        var Description<public>:message
+
+        @editable
+        # A shortened description of this entity.
+        var ShortDescription<public>:message
+
+using {/Verse.org/Native}
+@available {MinUploadedAtFNVersion := 4000}
+# Module import path: /Verse.org/Input
+Input<public> := module:
+    using {/Verse.org/Assets}
+    using {/Verse.org/Native}
+    using {/Verse.org/Simulation}
+    @available {MinUploadedAtFNVersion := 4000}
+    # Access input-related data and settings for a player.
+    GetPlayerInput<native><public>(Player:player)<transacts><decides>:player_input
+
+    @available {MinUploadedAtFNVersion := 4000}
+    # Input_events is a container for user input events which can be subscribed to.
+    #   * Use the 'GetPlayerInput' and 'GetInputEvents' functions to retrieve an input_events object for a given player.
+    #   * Low-level notifications of current user input: BeginDetectEvent, DetectionOngoingEvent, and EndDetectEvent.
+    #   * High-level notifications of triggered events: TriggerActivationEvent and CancelActivationEvent.
+    # 
+    #                         /—----------<-------\ 
+    #  BeginDetectEvent -> DetectionOngoingEvent -> TriggerActivationEvent -> EndDetectEvent 
+    #            /\                         /\                                            / 
+    #              \---------------------> CancelActivationEvent ----------------------/
+    input_events<native><public>(t:type) := class:
+        (/Verse.org/Input/input_events:)Input_input_events_Variance<private>():tuple(t) = external {}
+
+        # This input has met all required conditions and has successfully fired. Most of the time, you should bind to this event.
+        #  Tuple payload: 0: the player generating this event
+        #                 1: the value generated by the physical input
+        TriggerActivationEvent<native><public>:listenable(tuple(player, t)) = external {}
+
+        # This input has been canceled before activation. For example, if the key is released before a “Press and Hold” time threshold.
+        #  Tuple payload: 0: the player generating this event
+        #                 1: the value generated by the physical input
+        #                 2: elapsed seconds since detection began
+        CancelActivationEvent<native><public>:listenable(tuple(player, t, float)) = external {}
+
+        # Detection has started for this input e.g. a required key is now held down. Note: TriggerActivationEvent may also occur this frame,
+        #  but this event will always be fired first. DetectionBegin and DetectionEnd will always fire, regardless of whether the input is
+        #  successful or canceled.
+        #  Tuple payload: 0: the player generating this event
+        #                 1: the value generated by the physical input
+        BeginDetectEvent<native><public>:listenable(tuple(player, t)) = external {}
+
+        # Detection for this input is still being processed. For example, a time threshold may not be met.
+        #  Tuple payload: 0: the player generating this event
+        #                 1: the value generated by the physical input
+        #                 2: elapsed seconds since detection began
+        DetectionOngoingEvent<native><public>:listenable(tuple(player, t, float)) = external {}
+
+        # Detection has finished e.g. no required keys are now down. Will always fire as a pair with DetectionBegin.
+        #  Tuple payload: 0: the player generating this event
+        #                 1: elapsed seconds since detection began
+        EndDetectEvent<native><public>:listenable(tuple(player, float)) = external {}
+
+    @available {MinUploadedAtFNVersion := 4000}
+    # This is the main manager class for input-related settings and functions for a player.
+    player_input<native><public> := class:
+        AddInputMapping<native><public>(InputMapping:input_mapping):void
+
+        RemoveInputMapping<native><public>(InputMapping:input_mapping):void
+
+        GetInputEvents<native><public>(ActionToBind:input_action(t) where t:type):input_events(t)
+
+    @available {MinUploadedAtFNVersion := 4000}
+    # Module import path: /Verse.org/Input/UI
+    # The module contains a set of Input Actions that are available in UI mode, given that they're bound to an interactive UI element.
+    UI<public> := module:
+        using {/Verse.org/Native}
+        using {/Verse.org/Assets}
+        @available {MinUploadedAtFNVersion := 4000}
+        # MenuNavigationMapping includes the following actions with default key bindings:
+        #   * NextTab: E/Gamepad Right Shoulder
+        #   * PreviousTab: Q/Gamepad Left Shoulder
+        #   * NextPage: C/Gamepad Right Trigger
+        #   * PreviousPage: Z/Gamepad Left Trigger
+        #   * Back: Escape/Gamepad Back Button
+        MenuNavigationMapping<public>:input_mapping = external {}
+
+        @available {MinUploadedAtFNVersion := 4000}
+        NextTab<public>:input_action(logic) = external {}
+
+        @available {MinUploadedAtFNVersion := 4000}
+        PreviousTab<public>:input_action(logic) = external {}
+
+        @available {MinUploadedAtFNVersion := 4000}
+        NextPage<public>:input_action(logic) = external {}
+
+        @available {MinUploadedAtFNVersion := 4000}
+        PreviousPage<public>:input_action(logic) = external {}
+
+        @available {MinUploadedAtFNVersion := 4030}
+        Back<public>:input_action(logic) = external {}
+
+        @available {MinUploadedAtFNVersion := 4000}
+        # InventoryMenuMapping includes the following actions with default key bindings:
+        #   * Use: F/Gamepad Face Button Top
+        #   * Inspect: I/Gamepad Face Button Left
+        #   * Sort: V/Gamepad Right Thumbstick Button
+        #   * Drop: X/Gamepad Left Thumbstick Button
+        InventoryMenuMapping<public>:input_mapping = external {}
+
+        @available {MinUploadedAtFNVersion := 4000}
+        Use<public>:input_action(logic) = external {}
+
+        @available {MinUploadedAtFNVersion := 4000}
+        Inspect<public>:input_action(logic) = external {}
+
+        @available {MinUploadedAtFNVersion := 4000}
+        Sort<public>:input_action(logic) = external {}
+
+        @available {MinUploadedAtFNVersion := 4000}
+        Drop<public>:input_action(logic) = external {}
+
+        @available {MinUploadedAtFNVersion := 4000}
+        # CraftingMenuMapping includes the following actions with default key bindings:
+        #   * Craft: F/Gamepad Face Button Top
+        #   * Inspect: I/Gamepad Face Button Left
+        #   * Favorite: V/Gamepad Right Thumbstick Button
+        #   * Scrap: X/Gamepad Left Thumbstick Button
+        CraftingMenuMapping<public>:input_mapping = external {}
+
+        @available {MinUploadedAtFNVersion := 4000}
+        Craft<public>:input_action(logic) = external {}
+
+        @available {MinUploadedAtFNVersion := 4000}
+        Favorite<public>:input_action(logic) = external {}
+
+        @available {MinUploadedAtFNVersion := 4000}
+        Scrap<public>:input_action(logic) = external {}
+
+        @available {MinUploadedAtFNVersion := 4000}
+        # MapMenuMapping includes the following actions with default key bindings:
+        #   * Track: F/Gamepad Face Button Top
+        #   * PlaceMarker: P/Gamepad Face Button Left
+        #   * Reset: R/Gamepad Left Thumbstick Button
+        #   * ToggleView: V/Gamepad Right Thumbstick Button
+        #   * ZoomIn: Z/Gamepad Left Trigger
+        #   * ZoomOut: X/Gamepad Right Trigger
+        MapMenuMapping<public>:input_mapping = external {}
+
+        @available {MinUploadedAtFNVersion := 4000}
+        Track<public>:input_action(logic) = external {}
+
+        @available {MinUploadedAtFNVersion := 4000}
+        Reset<public>:input_action(logic) = external {}
+
+        @available {MinUploadedAtFNVersion := 4000}
+        PlaceMarker<public>:input_action(logic) = external {}
+
+        @available {MinUploadedAtFNVersion := 4000}
+        ToggleView<public>:input_action(logic) = external {}
+
+        @available {MinUploadedAtFNVersion := 4000}
+        ZoomIn<public>:input_action(logic) = external {}
+
+        @available {MinUploadedAtFNVersion := 4000}
+        ZoomOut<public>:input_action(logic) = external {}
+AgentGroup<public> := module:
+    using {/Verse.org/Simulation}
+    using {/Verse.org/Native}
+    @available {MinUploadedAtFNVersion := 4000}
+    @experimental
+    # Interface that defines a class as being usable as member info in an agent group
+    member_info_interface<native><public> := interface:
+
+    @available {MinUploadedAtFNVersion := 4000}
+    @experimental
+    # Interface that defines a class as providing an agent group.
+    agent_group_interface<public>(member_info:subtype(member_info_interface)) := interface:
+        (/Verse.org/AgentGroup/agent_group_interface:)AgentGroup_agent_group_interface_Variance<private>():tuple(member_info) = external {}
+
+        # Get the members of this agent group with their member info
+        GetMemberMap<public>()<reads>:[agent]member_info
+
+        # Signalled whenever an agent successfully joins this agent group.Passes in the agent that joined along with their member_info.
+        AddMemberEvent<public>:listenable(tuple(agent, member_info))
+
+        # Signalled whenever an agent successfully leaves this agent group.Passes in the agent that left along with their member_info.
+        RemoveMemberEvent<public>:listenable(tuple(agent, member_info))
+
+        # Signalled whenever the MemberInfo class is re-instantiated for a given agent.Passes in the agent that was updated along with their new member_info.
+        MemberInfoChangeEvent<public>:listenable(tuple(agent, member_info))
+
+    @available {MinUploadedAtFNVersion := 4000}
+    @experimental
+    # An agent group is defined as a set of agents that share a common ownership.This class stores agents and specific information about each member via the member_info type provided.
+    agent_group<native><public>(member_info:subtype(member_info_interface)) := class<unique>(agent_group_interface(member_info)):
+        (/Verse.org/AgentGroup/agent_group:)AgentGroup_agent_group_Variance<private>(:member_info):tuple(member_info) = external {}
+
+        # Get the members of this agent group with their member info
+        GetMemberMap<override><native>()<reads>:[agent]member_info
+
+        # Attempt to add the given agent to this agent group.This function returns a result that will either succeed or return an error.
+        AddMember<public>(Agent:agent, MemberInfo:member_info)<transacts>:result(void, add_member_error) = external {}
+
+        # Attempt to remove the given agent from this agent group.This function returns a result that will either succeed or return an error.
+        RemoveMember<public>(Agent:agent)<transacts>:result(void, remove_member_error) = external {}
+
+        # Signalled whenever an agent successfully joins this agent group.Passes in the agent that joined along with their member_info.
+        AddMemberEvent<override><native><final>:listenable(tuple(agent, member_info)) = external {}
+
+        # Signalled whenever an agent successfully leaves this agent group.Passes in the agent that left along with their member_info.
+        RemoveMemberEvent<override><native><final>:listenable(tuple(agent, member_info)) = external {}
+
+        # Signalled whenever the MemberInfo class is re-instantiated for a given agent.Passes in the agent that was updated along with their new member_info.
+        MemberInfoChangeEvent<override><native><final>:listenable(tuple(agent, member_info)) = external {}
+
+    @available {MinUploadedAtFNVersion := 4000}
+    @experimental
+    # Base class for all errors returned from agent_group.AddMember.
+    add_member_error<native><public> := class<computes>:
+
+    @available {MinUploadedAtFNVersion := 4000}
+    @experimental
+    # Base class for all errors returned from agent_group.RemoveMember.
+    remove_member_error<native><public> := class<computes>:
 
 Verse<public> := module:
     using {/Verse.org/Colors}
@@ -1282,15 +1486,15 @@ Verse<public> := module:
 
     @experimental
     # A `classifiable_subset` is a container that holds a set of elements. A classifiable_subset can hold multiple elements of the same type.
-    classifiable_subset<native><public>(element_type:type) := class<final><reads><internal>:
-        (/Verse.org/Verse/classifiable_subset:)Verse_classifiable_subset_Variance<private>:?type {_():tuple(element_type)} = external {}
+    classifiable_subset<native><public>(element_type:type) := class<final><computes><internal>:
+        (/Verse.org/Verse/classifiable_subset:)Verse_classifiable_subset_Variance<private>():tuple(element_type) = external {}
 
         # Temporary function for constraining variance correctly.
         CovarianceConstraint<protected>():?element_type = external {}
 
     @experimental
     # Constructs a `classifiable_subset` containing the `InElements`.
-    MakeClassifiableSubset<native><public>(InElements:[]t where t:type)<reads><converges>:classifiable_subset(t)
+    MakeClassifiableSubset<native><public>(InElements:[]t where t:type)<converges>:classifiable_subset(t)
 
     @available {MinUploadedAtFNVersion := 3800}
     @experimental
@@ -1352,7 +1556,7 @@ Verse<public> := module:
 
     # A *recurring*, successively signaled parametric `event` with a `payload` allowing a simple mechanism to coordinate between concurrent tasks.
     event<native><public>(t:type) := class(signalable(t), awaitable(t)):
-        (/Verse.org/Verse/event:)Verse_event_Variance<private>:?type {_(:t):tuple(t)} = external {}
+        (/Verse.org/Verse/event:)Verse_event_Variance<private>(:t):tuple(t) = external {}
 
         # Suspends the current task until another task calls `Signal`.
         # If called during another invocation of `Signal`, the the task will still suspend and resume during the next call to `Signal`.
@@ -1398,7 +1602,6 @@ Verse<public> := module:
 
     # A parametric interface combining `awaitable` and `subscribable`.
     listenable<public>(payload:type) := interface(awaitable(payload), subscribable(payload)):
-        (/Verse.org/Verse/listenable:)Verse_listenable_Variance<private>:?type {_():tuple()} = external {}
 
     # A parameterless interface combining `awaitable` and `subscribable`.
     listenable<public>() := listenable(tuple())
@@ -1466,41 +1669,41 @@ Verse<public> := module:
 
     @vm_no_effect_token
     @rtfm_always_open
-    # Returns the sine of `X` if `IsFinite(X)`.
-    # Returns `NaN` if `not IsFinite(X)
+    # Returns the sine of `X`, where `X` is interpreted as a value in radians, if `IsFinite[X]`.
+    # Returns `NaN` if `not IsFinite[X]`.
     Sin<native><public>(X:float)<reads>:float
 
     @vm_no_effect_token
     @rtfm_always_open
-    # Returns the cosine of `X` if `IsFinite(X)`.
-    # Returns `NaN` if `not IsFinite(X)
+    # Returns the cosine of `X`, where `X` is interpreted as a value in radians, if `IsFinite[X]`.
+    # Returns `NaN` if `not IsFinite[X]`.
     Cos<native><public>(X:float)<reads>:float
 
     @vm_no_effect_token
     @rtfm_always_open
-    # Returns the tangent of `X` if `IsFinite(X)`.
-    # Returns `NaN` if `not IsFinite(X).
+    # Returns the tangent of `X`, where `X` is interpreted as a value in radians, if `IsFinite[X]`.
+    # Returns `NaN` if `not IsFinite[X]`.
     Tan<native><public>(X:float)<reads>:float
 
     @vm_no_effect_token
     @rtfm_always_open
-    # Returns the inverse sine (arcsine) of `X` if `-1.0 <= X <= 1.0`.
+    # Returns the inverse sine (arcsine) of `X` as a value in radians if `-1.0 <= X <= 1.0`.
     ArcSin<native><public>(X:float)<reads>:float
 
     @vm_no_effect_token
     @rtfm_always_open
-    # Returns the inverse cosine (arccosine) of `X` if `-1.0 <= X <= 1.0`.
+    # Returns the inverse cosine (arccosine) of `X` as a value in radians if `-1.0 <= X <= 1.0`.
     ArcCos<native><public>(X:float)<reads>:float
 
     @vm_no_effect_token
     @rtfm_always_open
-    # Returns the inverse tangent (arctangent) of `X` such that:`-PiFloat/2.0 <= ArcTan(x) <= PiFloat/2.0`.
+    # Returns the inverse tangent (arctangent) of `X` as a value in radians such that:`-PiFloat/2.0 <= ArcTan(x) <= PiFloat/2.0`.
     ArcTan<native><public>(X:float)<reads>:float
 
     @vm_no_effect_token
     @rtfm_always_open
     # Returns the angle in radians at the origin between a ray pointing to `(X, Y)` and the positive `X` axis such that `-PiFloat < ArcTan(Y, X) <= PiFloat`.
-    # Returns 0.0 if `X=0.0 and Y=0.0`.
+    # Returns `0.0` if `X=0.0 and Y=0.0`.
     ArcTan<native><public>(Y:float, X:float)<reads>:float
 
     @vm_no_effect_token
@@ -1600,8 +1803,8 @@ Verse<public> := module:
 
     @available {MinUploadedAtFNVersion := 3800}
     # Implemented by classes that provide a result for an operation, which can fail or be successful
-    result<public>(success_type:type, error_type:type) := interface<internal>:
-        (/Verse.org/Verse/result:)Verse_result_Variance<private>:?type {_():tuple(success_type, error_type)} = external {}
+    result<public>(success_type:type, error_type:type) := interface<computes><internal>:
+        (/Verse.org/Verse/result:)Verse_result_Variance<private>():tuple(success_type, error_type) = external {}
 
         # Returns the success data of the specified type.
         GetSuccess<native_callable><public>()<computes><decides>:success_type
@@ -1610,10 +1813,10 @@ Verse<public> := module:
         GetError<native_callable><public>()<computes><decides>:error_type
 
     @available {MinUploadedAtFNVersion := 3800}
-    MakeSuccess<public>(Result:success_type where success_type:type):result(success_type, false) = external {}
+    MakeSuccess<public>(Result:success_type where success_type:type)<computes>:result(success_type, false) = external {}
 
     @available {MinUploadedAtFNVersion := 3800}
-    MakeError<public>(Result:error_type where error_type:type):result(false, error_type) = external {}
+    MakeError<public>(Result:error_type where error_type:type)<computes>:result(false, error_type) = external {}
 
     @available {MinUploadedAtFNVersion := 3800}
     # Implemented by classes whose instances can change visibility to be shown or hidden.
@@ -1624,7 +1827,7 @@ Verse<public> := module:
     # A parametric interface implemented by events with a `payload` that can be signaled.
     # Can be used with `awaitable`, `subscribable`, or both (see: `listenable`).
     signalable<public>(payload:type) := interface:
-        (/Verse.org/Verse/signalable:)Verse_signalable_Variance<private>:?type {_(:payload):tuple()} = external {}
+        (/Verse.org/Verse/signalable:)Verse_signalable_Variance<private>(:payload):tuple() = external {}
 
         # Concurrently resumes the tasks waiting for this event in `awaitable.Await` and synchronously invokes any callbacks added to this event by `subscribable.Subscribe`.
         Signal<native_callable><public>(Val:payload):void
@@ -1641,7 +1844,7 @@ Verse<public> := module:
     # A parametric interface implemented by events with a `payload` that can be subscribed to.
     # Matched with `signalable.`
     subscribable<public>(t:type) := interface:
-        (/Verse.org/Verse/subscribable:)Verse_subscribable_Variance<private>:?type {_():tuple(t)} = external {}
+        (/Verse.org/Verse/subscribable:)Verse_subscribable_Variance<private>():tuple(t) = external {}
 
         # Registers `Callback` to be invoked on matching calls to `signable.Signal`.
         # Returns an unsubscriber object. Call `cancelable.Cancel` on the unsubscriber to unregister `Callback`.
@@ -1650,13 +1853,277 @@ Verse<public> := module:
     # A parameterless interface implemented by events that can be subscribed to.
     subscribable<public>() := subscribable(tuple())
 
+# Module import path: /Verse.org/Simulation
+Simulation<public> := module:
+    using {/Verse.org/SceneGraph}
+    agent<native><public> := class<unique><epic_internal>(entity):
+
+    player<native><public> := class<unique><persistent><module_scoped_var_weak_map_key><epic_internal>(agent):
+        # Succeeds when this `player` may be used as a module-scoped `var` `weak_map` key. This coincides with the corresponding player having joined the game and not yet left. Using a `player` as a module-scope `var` `weak_map` key when this method fails results in a runtime error.
+        IsActive<native><public>()<reads><decides>:void
+
+
+    # Module import path: /Verse.org/Simulation/Tags
+    Tags<public> := module:
+        using {/Verse.org/Native}
+        # An interface representing a mutable collection of tags.
+        has_tags<native><public> := interface<epic_internal>:
+            # Adds a `tag` instance to this container. Returns a `tag_key` that is uniquely associated with the added instance.
+            AddTag<native_callable><public>(Tag:tag)<transacts>:tag_key
+
+            # Removes the tag instance associated with the `tag_key`, succeeds if an instance was removed, fails otherwise.
+            RemoveTag<native_callable><public>(Key:tag_key)<transacts><decides>:void
+
+            @available {MinUploadedAtFNVersion := 3200}
+            # Removes all tag instances of type `tag_type`, succeeds if at least one instance was removed, fails otherwise.
+            RemoveAllTags<native_callable><public>(tag_type:castable_subtype(tag))<transacts><decides>:void
+
+            @available {MinUploadedAtFNVersion := 3200}
+            # Removes all tag instances that are not of type `tag_type`, succeeds if at least one instance was removed, fails otherwise.
+            RemoveAllTagsExcept<native_callable><public>(tag_type:castable_subtype(tag))<transacts><decides>:void
+
+            @available {MinUploadedAtFNVersion := 3200}
+            # Removes all tag instances that are not of any of the types in `tag_types`, succeeds if at least one instance was removed, fails otherwise.
+            RemoveAllTagsExcept<native_callable><public>(tag_types:[]castable_subtype(tag))<transacts><decides>:void
+
+            @available {MinUploadedAtFNVersion := 3200}
+            # Succeeds if at least one tag of type `tag_type` is found in this container, fails otherwise.
+            ContainsTag<native_callable><public>(tag_type:castable_subtype(tag))<reads><decides>:void
+
+            @available {MinUploadedAtFNVersion := 3200}
+            # Fails if at least one type in `tag_types` cannot be found in this container, succeeds otherwise. Note that this means that if `tag_types` is empty this call succeeds.
+            ContainsAllTags<native_callable><public>(tag_types:[]castable_subtype(tag))<reads><decides>:void
+
+            @available {MinUploadedAtFNVersion := 3200}
+            # Succeeds if at least of the types in `tag_types` is found in this container, fails otherwise. Note that this means that if `tag_types` is empty this call fails.
+            ContainsAnyTag<native_callable><public>(tag_types:[]castable_subtype(tag))<reads><decides>:void
+
+        # A base type used for tagging objects in order to hierarchically evaluate an objects classification.
+        tag<native><public> := class<abstract><castable>:
+
+        @import_as("/*.FVerseTagKey")
+        # A `tag_key` is the return value from adding a `tag` to a container implementing the `has_tags` interface, and is used to selectively remove such an instance from the same container.
+        tag_key<native><public> := struct<internal>:
+
+        tag_search_sort_type<native><public> := enum:
+            Unsorted
+            Sorted
+
+        # Advanced tag search criteria
+        tag_search_criteria<native><public> := class:
+            # Tags required to be on the object.
+            RequiredTags<native><public>:[]tag = external {}
+
+            # Tags that are used if no required tags are specified. These are treated as if any of them will do.
+            PreferredTags<native><public>:[]tag = external {}
+
+            # Tags that may NOT be on the object. All items with these tags are excluded from the search.
+            ExclusionTags<native><public>:[]tag = external {}
+
+            # Flag to request sorting the results by tag.
+            SortType<native><public>:tag_search_sort_type = external {}
+
+        # A queryable collection of tags.
+        tag_view<native><public> := interface<epic_internal>:
+            # Determine if TagToCheck is present in this container, also checking against parent tags {"A.1"}.Has("A") will return True, {"A"}.Has("A.1") will return False If TagToCheck is not Valid it will always return False.
+            Has<public>(TagToCheck:tag)<reads><decides>:void
+
+            # Checks if this container contains ANY of the tags in the specified container, also checks against parent tags {"A.1"}.HasAny({"A","B"}) will return True, {"A"}.HasAny({"A.1","B"}) will return False If InTags is empty/invalid it will always return False.
+            HasAny<public>(InTags:[]tag)<reads><decides>:void
+
+            # Checks if this container contains ALL of the tags in the specified container, also checks against parent tags {"A.1","B.1"}.HasAll({"A","B"}) will return True, {"A","B"}.HasAll({"A.1","B.1"}) will return False If InTags is empty/invalid it will always return True, because there were no failed checks.
+            HasAll<public>(InTags:[]tag)<reads><decides>:void
+
+    @attribscope_class
+    @attribscope_struct
+    @attribscope_data
+    @customattribhandler
+    editable<public> := class<computes>(attribute):
+        # The tooltip displayed in the editor.
+        ToolTip<public>:message = external {}
+
+        # The categories displayed in the editor.
+        Categories<public>:[]message = external {}
+
+    @attribscope_class
+    @attribscope_struct
+    @attribscope_data
+    @customattribhandler
+    editable_text_box<public> := class<final><computes>(editable):
+        # True if the editor text box should support multiple lines.
+        MultiLine<public>:logic = external {}
+
+        # The maximum length of the text.
+        MaxLength<public>:int = external {}
+
+    @attribscope_class
+    @attribscope_struct
+    @attribscope_data
+    @customattribhandler
+    editable_slider<public>(t:type) := class<final><computes>(editable):
+        (/Verse.org/Simulation/editable_slider:)Simulation_editable_slider_Variance<private>():tuple(t) = external {}
+
+        # The minimum value of the editor slider.
+        MinValue<public>:?t = external {}
+
+        # The maximum value of the editor slider.
+        MaxValue<public>:?t = external {}
+
+        # The amount the slider moves for each step.
+        SliderDelta<public>:?t = external {}
+
+        # Used to scale a slider exponentially. Common values are found within the range of 1-20.
+        SliderExponent<public>:?t = external {}
+
+        # Used to change how sensitive the field value is when moving the slider via mouse cursor.
+        MouseLinearDeltaSensitivity<public>:float = external {}
+
+        MouseShiftMovePixelPerDelta<public>:float = external {}
+
+    @attribscope_class
+    @attribscope_struct
+    @attribscope_data
+    @customattribhandler
+    editable_number<public>(t:type) := class<final><computes>(editable):
+        (/Verse.org/Simulation/editable_number:)Simulation_editable_number_Variance<private>():tuple(t) = external {}
+
+        # The minimum value the editor allows.
+        MinValue<public>:?t = external {}
+
+        # The maximum value the editor allows.
+        MaxValue<public>:?t = external {}
+
+        # Snap the spinbox to the nearest delta.
+        SpinBoxDelta<public>:?t = external {}
+
+    @attribscope_class
+    @attribscope_struct
+    @attribscope_data
+    @customattribhandler
+    editable_vector_slider<public>(t:type) := class<final><computes>(editable):
+        (/Verse.org/Simulation/editable_vector_slider:)Simulation_editable_vector_slider_Variance<private>():tuple(t) = external {}
+
+        # Show the button that allows locking the vector aspect ratio.
+        ShowPreserveRatio<public>:logic = external {}
+
+        # Show the button that allows normalizing the vector.
+        ShowNormalize<public>:logic = external {}
+
+        # The minimum value allowed for each vector element.
+        MinComponentValue<public>:?t = external {}
+
+        # The maximum value allowed for each vector element.
+        MaxComponentValue<public>:?t = external {}
+
+        # The amount the slider moves for each step.
+        SliderDelta<public>:?t = external {}
+
+        # Used to scale a slider exponentially. Common values are found within the range of 1-20.
+        SliderExponent<public>:?t = external {}
+
+        # Used to change how sensitive the field value is when moving the slider via mouse cursor.
+        MouseLinearDeltaSensitivity<public>:float = external {}
+
+        MouseShiftMovePixelPerDelta<public>:float = external {}
+
+    @attribscope_class
+    @attribscope_struct
+    @attribscope_data
+    @customattribhandler
+    editable_vector_number<public>(t:type) := class<final><computes>(editable):
+        (/Verse.org/Simulation/editable_vector_number:)Simulation_editable_vector_number_Variance<private>():tuple(t) = external {}
+
+        # Show the button that allows locking the vector aspect ratio.
+        ShowPreserveRatio<public>:logic = external {}
+
+        # Show the button that allows normalizing the vector.
+        ShowNormalize<public>:logic = external {}
+
+        # The minimum value allowed for each vector element.
+        MinComponentValue<public>:?t = external {}
+
+        # The maximum value allowed for each vector element.
+        MaxComponentValue<public>:?t = external {}
+
+        # Snap the spinbox to the nearest delta.
+        SpinBoxDelta<public>:?t = external {}
+
+    @attribscope_class
+    @attribscope_struct
+    @attribscope_data
+    @customattribhandler
+    editable_container<public> := class<final><computes>(editable):
+        # If true, allows reordering of the container elements in the editor.
+        AllowReordering<public>:logic = external {}
+
+
+    using {/Verse.org/Native}
+    # Type for which there is a single instance per round.  Use `GetSession` to get the current round's `session` instance. May be used with `weak_map` to implement global variables.
+    # Note: may be changed in a future release to a single instance per game. Round-local behavior should not be relied upon.
+    session<native><public> := class<unique><module_scoped_var_weak_map_key><epic_internal>:
+
+    # Returns the `session` corresponding to the current round.  The result can be used with `weak_map` to implement global variables.
+    # Note: may be changed in a future release to return a single instance per game. Round-local behavior should not be relied upon.
+    GetSession<native><public>()<reads>:session
+
+    # Specifies what type of environment the current session is in.
+    session_environment<native><public> := enum:
+        # The current session is in an Edit environment for an experience, such as a session started within UEFN.
+        Edit
+        # The current session is in a Private environment for an experience, such as a playtest.
+        Private
+        # The current session is in a Live environment for an experience.
+        Live
+
+    @available {MinUploadedAtFNVersion := 3800}
+    (Session:session).Environment<native><public>()<transacts>:session_environment
+
+    # Waits specified number of seconds and then resumes. If `Seconds` = 0.0 then it waits until next tick/frame/update. If `Seconds` = Inf then it waits forever and only calls back if canceled - such as via `race`. If `Seconds` < 0.0 then it completes immediately and does not yield to other aysnc expressions.
+    # Waiting until the next update (0.0) is especially useful in a loop of a coroutine that needs to do some work every update and this yields to other coroutines so that it doesn't hog a processor's resources.
+    # Waiting forever (Inf) will have any expression that follows never be evaluated. Occasionally it is desireable to have a task never complete such as the last expression in a `race` subtask where the task must never win the race though it still may be canceled earlier.
+    # Immediately completing (less than 0) is useful when you want programmatic control over whether an expression yields or not.
+    Sleep<native><public>(Seconds:float)<suspends>:void
+
+    # Get the seconds that have elapsed since the world began simulating
+    GetSimulationElapsedTime<native><public>()<transacts>:float
+
+    team<native><public> := class<unique><epic_internal>:
+
+# Module import path: /Verse.org/Assets
+Assets<public> := module:
+    using {/Verse.org/Simulation}
+    animation_sequence<native><public> := class<computes><final><epic_internal>:
+
+    material<native><public> := class<epic_internal>:
+
+    particle_system<native><public> := class<computes><final><epic_internal>:
+
+    mesh<native><public> := class<computes><epic_internal>:
+
+    sound_wave<native><public> := class<computes><final><epic_internal>:
+
+    texture<native><public> := class<computes><final><epic_internal>:
+
+    input_action<native><public>(t:type) := class<computes><epic_internal>:
+        (/Verse.org/Assets/input_action:)Assets_input_action_Variance<private>():tuple(t) = external {}
+
+    input_mapping<native><public> := class<computes><epic_internal>:
+
+    # Interface that provides an icon.
+    has_icon<native><public> := interface:
+        @editable
+        # A texture used as the 2D visual representation of this entity (e.g. an icon or portrait).
+        var Icon<public>:texture
+
+
 # Module import path: /Verse.org/Colors
 Colors<public> := module:
     using {/Verse.org/Native}
     using {/Verse.org/Simulation}
+    @import_as("/*.FVColor")
     # Represents colors as RGB triples in the ACES 2065-1 color space.
     # Component values are linear (i.e. `*gamma* = 1.0`).
-    color<native><public> := struct<concrete><computes><persistable>:
+    color<native><public> := struct<concrete><computes><persistable><uht_comparable>:
         @editable
         # Red component of this `color`.
         R<native><public>:float = external {}
@@ -2030,12 +2497,13 @@ Colors<public> := module:
         YellowGreen<public>:color = external {}
 
     @available {MinUploadedAtFNVersion := 3800}
+    @import_as("/*.FVColorAlpha")
     # Represents colors as RGB triples in the ACES 2065-1 color space with an additional alpha channel A.
     # This reasons about the `Color` and alpha (`A`) as separate concepts instead of as a single concept.
     # All values are stored strictly as unopinionated floats but, when interpreted as a color with alpha,
     # ranges for `A` are `0.0` (transparent) to `1.0` (opaque). Color values are not premultiplied.
     # Component values are linear (i.e. `*gamma* = 1.0`).
-    color_alpha<native><public> := struct<concrete><computes><persistable>:
+    color_alpha<native><public> := struct<concrete><computes><persistable><uht_comparable>:
         @editable
         # `Color` component of this `color_alpha`.
         Color<native><public>:color = external {}
@@ -2200,15 +2668,15 @@ SpatialMath<public> := module:
     transform<native><public> := struct<concrete><computes>:
         @editable
         # The location of this `transform`.
-        Translation<public>:vector3 = external {}
+        Translation<native><public>:vector3 = external {}
 
         @editable
         # The rotation of this `transform`.
-        Rotation<public>:rotation = external {}
+        Rotation<native><public>:rotation = external {}
 
         @editable
         # The scale of this `transform`.
-        Scale<public>:vector3 = external {}
+        Scale<native><public>:vector3 = external {}
 
     # Makes a `vector3` by applying `InTransform` to `InVector`.
     (/Verse.org/SpatialMath:)operator'*'<public>(InVector:vector3, InTransform:transform)<reads>:vector3 = external {}
@@ -2219,18 +2687,18 @@ SpatialMath<public> := module:
 
     @import_as("/*.FVVector3")
     # 3-dimensional vector with `float` components.
-    vector3<native><public> := struct<concrete><computes><persistable>:
+    vector3<native><public> := struct<concrete><computes><persistable><uht_comparable>:
         @editable
         # The Left (was -Y) component of this vector.
-        Left<public>:float = external {}
+        Left<native><public>:float = external {}
 
         @editable
         # The Up (was Z) component of this vector.
-        Up<public>:float = external {}
+        Up<native><public>:float = external {}
 
         @editable
         # The Forward (was X) component of this vector.
-        Forward<public>:float = external {}
+        Forward<native><public>:float = external {}
 
     # Makes a `vector3` by inverting the `SurfaceNormal` component of `Direction`.
     ReflectVector<public>(Direction:vector3, SurfaceNormal:vector3)<reads>:vector3 = external {}
@@ -2324,6 +2792,12 @@ Random<public> := module:
     # Makes an `array` with the same elements as `Input` shuffled in a random order.
     Shuffle<public>(Input:[]t where t:type)<transacts>:[]t = external {}
 
+# Module import path: /Verse.org/Predicts
+Predicts<public> := module:
+    PredictsServerRegisterObject<native><epic_internal>(__dupe___unnamed_parameter_16:any)<transacts>:any
+
+    PredictsIsRunningOnServer<native><epic_internal>()<transacts><decides><predicts>:void
+
 # Module import path: /Verse.org/Native
 Native<public> := module:
     @attribscope_class
@@ -2337,9 +2811,10 @@ Native<public> := module:
 
 # Module import path: /Verse.org/Concurrency
 Concurrency<public> := module:
+    using {/Verse.org/Native}
     # A parametric interface implemented by events with a `payload` that can be waited on. Matched with `signalable.`
     awaitable<public>(payload:type) := interface:
-        (/Verse.org/Concurrency/awaitable:)Concurrency_awaitable_Variance<private>:?type {_():tuple(payload)} = external {}
+        (/Verse.org/Concurrency/awaitable:)Concurrency_awaitable_Variance<private>():tuple(payload) = external {}
 
         # Suspends the current task until resumed by a matching call to `signalable.Signal`. Returns the event `payload`.
         Await<public>()<suspends>:payload
@@ -2347,6 +2822,6 @@ Concurrency<public> := module:
     awaitable<public>() := awaitable(void)
 
     task<native><public>(t:type) := class<abstract><final>(awaitable(t)):
-        (/Verse.org/Concurrency/task:)Concurrency_task_Variance<private>:?type {_():tuple(t)} = external {}
+        (/Verse.org/Concurrency/task:)Concurrency_task_Variance<private>():tuple(t) = external {}
 
         Await<native><override>()<suspends>:t
